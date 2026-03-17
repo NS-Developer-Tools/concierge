@@ -1,0 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+:root {
+  --background: #f8fafc;
+  --foreground: #1a1a2e;
+  --primary: #1E73BE;
+  --primary-dark: #0D3A5C;
+  --primary-semi-dark: #155A9E;
+  --primary-light: #A8CEEF;
+  --primary-ultra-light: #E8F3FD;
+  --accent-gold: #F5A623;
+  --accent-green: #00D084;
+  --neutral: #4F5050;
+  --base-light: #E8E8E8;
+  --base-ultra-light: #F5F5F5;
+  --danger: #EF4444;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-dark: var(--primary-dark);
+  --color-primary-semi-dark: var(--primary-semi-dark);
+  --color-primary-light: var(--primary-light);
+  --color-primary-ultra-light: var(--primary-ultra-light);
+  --color-accent-gold: var(--accent-gold);
+  --color-accent-green: var(--accent-green);
+  --color-neutral: var(--neutral);
+  --color-base-light: var(--base-light);
+  --color-base-ultra-light: var(--base-ultra-light);
+  --color-danger: var(--danger);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Figtree', Arial, Helvetica, sans-serif;
+}

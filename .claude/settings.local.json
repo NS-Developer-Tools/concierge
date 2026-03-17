@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:neighborserve.com)",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm --no-turbopack)",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm --no-turbopack --yes)",
+      "Read(//private/tmp/**)",
+      "Bash(npx create-next-app@latest concierge-temp --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm --no-turbopack)",
+      "Bash(cp -r /tmp/concierge-temp/* /Users/careyjones/neighborserve-concierge/)",
+      "Bash(cp /tmp/concierge-temp/.gitignore /Users/careyjones/neighborserve-concierge/)",
+      "Bash(cp /tmp/concierge-temp/.eslintrc.json /Users/careyjones/neighborserve-concierge/)",
+      "Bash(cp -r /tmp/concierge-temp/.next /Users/careyjones/neighborserve-concierge/)",
+      "Bash(npm install:*)",
+      "Bash(NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder npm run build)",
+      "Bash(NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=placeholder npx next build)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git rm:*)"
+    ]
+  }
+}
