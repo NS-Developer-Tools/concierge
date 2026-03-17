@@ -3,30 +3,61 @@
 import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Client, Communication } from '@/lib/types';
+import { Client, Communication, ServiceCompletion, CustomService } from '@/lib/types';
 import {
   MAINTENANCE_ITEMS,
   getRecommendedItems,
   getSeasonColor,
   getCurrentSeason,
   getSeasonLabel,
+  MaintenanceItem,
 } from '@/lib/maintenance-data';
 import Link from 'next/link';
+
+const SEASON_OPTIONS = [
+  { value: 'spring', label: 'Spring' },
+  { value: 'summer', label: 'Summer' },
+  { value: 'fall', label: 'Fall' },
+  { value: 'winter', label: 'Winter' },
+  { value: 'recurring', label: 'Recurring' },
+];
+
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 export default function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const [client, setClient] = useState<Client | null>(null);
   const [communications, setCommunications] = useState<Communication[]>([]);
+  const [completions, setCompletions] = useState<ServiceCompletion[]>([]);
+  const [customServices, setCustomServices] = useState<CustomService[]>([]);
   const [newNote, setNewNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Add/Edit custom service modal state
+  const [showServiceModal, setShowServiceModal] = useState(false);
+  const [editingService, setEditingService] = useState<CustomService | null>(null);
+  const [serviceForm, setServiceForm] = useState({
+    name: '',
+    description: '',
+    season: 'recurring',
+    frequency: '',
+    active_months: [] as number[],
+  });
+  const [savingService, setSavingService] = useState(false);
+
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
   useEffect(() => {
     loadClient();
     loadCommunications();
+    loadCompletions();
+    loadCustomServices();
   }, [id]);
 
   async function loadClient() {
@@ -53,6 +84,51 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       .order('communicated_at', { ascending: false });
 
     setCommunications(data || []);
+  }
+
+  async function loadCompletions() {
+    const { data } = await supabase
+      .from('service_completions')
+      .select('*')
+      .eq('client_id', id)
+      .eq('completed_month', now.getMonth())
+      .eq('completed_year', now.getFullYear());
+
+    setCompletions(data || []);
+  }
+
+  async function loadCustomServices() {
+    const { data } = await supabase
+      .from('custom_services')
+      .select('*')
+      .eq('client_id', id)
+      .order('created_at', { ascending: true });
+
+    setCustomServices(data || []);
+  }
+
+  async function toggleCompletion(serviceId: string) {
+    const existing = completions.find(
+      (c) => c.service_id === serviceId
+    );
+
+    if (existing) {
+      // Uncheck - delete the completion
+      await supabase.from('service_completions').delete().eq('id', existing.id);
+    } else {
+      // Check - insert completion
+      await supabase.from('service_completions').insert({
+        client_id: id,
+        service_id: serviceId,
+        completed_month: currentMonth,
+        completed_year: currentYear,
+      });
+    }
+    loadCompletions();
+  }
+
+  function isCompleted(serviceId: string): boolean {
+    return completions.some((c) => c.service_id === serviceId);
   }
 
   async function logCommunication(e: React.FormEvent) {
@@ -82,6 +158,76 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     setDeleting(false);
   }
 
+  // Custom service CRUD
+  function openAddService() {
+    setEditingService(null);
+    setServiceForm({ name: '', description: '', season: 'recurring', frequency: '', active_months: [] });
+    setShowServiceModal(true);
+  }
+
+  function openEditService(svc: CustomService) {
+    setEditingService(svc);
+    setServiceForm({
+      name: svc.name,
+      description: svc.description || '',
+      season: svc.season,
+      frequency: svc.frequency || '',
+      active_months: svc.active_months || [],
+    });
+    setShowServiceModal(true);
+  }
+
+  function computeNotifyMonths(activeMonths: number[]): number[] {
+    return activeMonths.map((m) => (m - 1 + 12) % 12);
+  }
+
+  async function saveCustomService(e: React.FormEvent) {
+    e.preventDefault();
+    if (!serviceForm.name.trim()) return;
+    setSavingService(true);
+
+    const payload = {
+      client_id: id,
+      name: serviceForm.name.trim(),
+      description: serviceForm.description.trim() || null,
+      season: serviceForm.season,
+      frequency: serviceForm.frequency.trim() || null,
+      active_months: serviceForm.active_months,
+      notify_months: computeNotifyMonths(serviceForm.active_months),
+    };
+
+    if (editingService) {
+      await supabase.from('custom_services').update(payload).eq('id', editingService.id);
+    } else {
+      await supabase.from('custom_services').insert(payload);
+    }
+
+    setSavingService(false);
+    setShowServiceModal(false);
+    loadCustomServices();
+  }
+
+  async function deleteCustomService(svcId: string) {
+    await supabase.from('custom_services').delete().eq('id', svcId);
+    // Also remove any completions for this custom service
+    await supabase
+      .from('service_completions')
+      .delete()
+      .eq('client_id', id)
+      .eq('service_id', `custom-${svcId}`);
+    loadCustomServices();
+    loadCompletions();
+  }
+
+  function toggleMonth(month: number) {
+    setServiceForm((prev) => ({
+      ...prev,
+      active_months: prev.active_months.includes(month)
+        ? prev.active_months.filter((m) => m !== month)
+        : [...prev.active_months, month].sort((a, b) => a - b),
+    }));
+  }
+
   if (loading) {
     return <div className="text-center py-12 text-neutral">Loading client...</div>;
   }
@@ -91,17 +237,59 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   }
 
   const currentSeason = getCurrentSeason();
-  const recommendedItems = getRecommendedItems(client.services);
-  const allClientServices = MAINTENANCE_ITEMS.filter((item) =>
+
+  // Get recommended items from standard maintenance items
+  const standardRecommended = getRecommendedItems(client.services);
+
+  // Get recommended items from custom services for this month
+  const customRecommended = customServices.filter(
+    (svc) =>
+      svc.notify_months.includes(currentMonth) || svc.active_months.includes(currentMonth)
+  );
+
+  // Combine into a unified recommended list
+  type RecommendedItem = {
+    id: string;
+    name: string;
+    description: string;
+    season: string;
+    frequency?: string | null;
+    isCustom: boolean;
+    customServiceId?: string;
+  };
+
+  const recommendedItems: RecommendedItem[] = [
+    ...standardRecommended.map((item) => ({
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      season: item.season,
+      frequency: item.frequency,
+      isCustom: false,
+    })),
+    ...customRecommended.map((svc) => ({
+      id: `custom-${svc.id}`,
+      name: svc.name,
+      description: svc.description || '',
+      season: svc.season,
+      frequency: svc.frequency,
+      isCustom: true,
+      customServiceId: svc.id,
+    })),
+  ];
+
+  // All subscribed services (standard + custom)
+  const allStandardServices = MAINTENANCE_ITEMS.filter((item) =>
     client.services.includes(item.id)
   );
 
   // Check if contacted this month
-  const now = new Date();
   const contactedThisMonth = communications.some((c) => {
     const d = new Date(c.communicated_at);
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   });
+
+  const completedCount = recommendedItems.filter((item) => isCompleted(item.id)).length;
 
   return (
     <div className="max-w-5xl">
@@ -171,14 +359,31 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left Column */}
         <div className="space-y-6">
-          {/* Seasonal Recommendations */}
+          {/* Seasonal Recommendations with Checkboxes */}
           <div className="bg-white rounded-xl border border-base-light p-6">
-            <h2 className="text-lg font-semibold text-foreground mb-1">
-              Recommended This Month
-            </h2>
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-lg font-semibold text-foreground">
+                Recommended This Month
+              </h2>
+              {recommendedItems.length > 0 && (
+                <span className="text-xs font-medium text-neutral">
+                  {completedCount}/{recommendedItems.length} discussed
+                </span>
+              )}
+            </div>
             <p className="text-sm text-neutral mb-4">
-              {getSeasonLabel(currentSeason)} &mdash; Items to discuss with client (includes 30-day advance notice)
+              {getSeasonLabel(currentSeason)} &mdash; Check off items as you discuss them with the client
             </p>
+
+            {/* Progress bar */}
+            {recommendedItems.length > 0 && (
+              <div className="w-full bg-base-ultra-light rounded-full h-2 mb-4">
+                <div
+                  className="bg-primary h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(completedCount / recommendedItems.length) * 100}%` }}
+                />
+              </div>
+            )}
 
             {recommendedItems.length === 0 ? (
               <p className="text-sm text-neutral py-4 text-center">
@@ -186,57 +391,160 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               </p>
             ) : (
               <div className="space-y-2">
-                {recommendedItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-start gap-3 p-3 rounded-lg bg-base-ultra-light"
-                  >
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded text-xs font-medium mt-0.5 ${getSeasonColor(
-                        item.season
-                      )}`}
+                {recommendedItems.map((item) => {
+                  const completed = isCompleted(item.id);
+                  return (
+                    <div
+                      key={item.id}
+                      className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all ${
+                        completed
+                          ? 'bg-green-50 border border-green-200'
+                          : 'bg-base-ultra-light hover:bg-gray-100'
+                      }`}
+                      onClick={() => toggleCompletion(item.id)}
                     >
-                      {item.season === 'recurring' ? item.frequency : item.season}
-                    </span>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{item.name}</p>
-                      <p className="text-xs text-neutral mt-0.5">{item.description}</p>
+                      {/* Checkbox */}
+                      <div className="mt-0.5 flex-shrink-0">
+                        <div
+                          className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+                            completed
+                              ? 'bg-green-500 border-green-500'
+                              : 'border-gray-300 bg-white'
+                          }`}
+                        >
+                          {completed && (
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded text-xs font-medium mt-0.5 flex-shrink-0 ${getSeasonColor(
+                          item.season as any
+                        )}`}
+                      >
+                        {item.season === 'recurring' ? item.frequency : item.season}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className={`text-sm font-medium ${completed ? 'text-green-700 line-through' : 'text-foreground'}`}>
+                            {item.name}
+                          </p>
+                          {item.isCustom && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
+                              Custom
+                            </span>
+                          )}
+                        </div>
+                        <p className={`text-xs mt-0.5 ${completed ? 'text-green-600' : 'text-neutral'}`}>
+                          {item.description}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
 
-          {/* All Subscribed Services */}
+          {/* All Subscribed Services + Custom Services */}
           <div className="bg-white rounded-xl border border-base-light p-6">
-            <h2 className="text-lg font-semibold text-foreground mb-4">
-              All Subscribed Services ({allClientServices.length})
-            </h2>
-            {allClientServices.length === 0 ? (
-              <p className="text-sm text-neutral">No services selected for this client.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {allClientServices.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-base-ultra-light"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground">{item.name}</span>
-                      {item.frequency && (
-                        <span className="text-xs text-primary">{item.frequency}</span>
-                      )}
-                    </div>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded font-medium ${getSeasonColor(
-                        item.season
-                      )}`}
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-foreground">
+                All Services ({allStandardServices.length + customServices.length})
+              </h2>
+              <button
+                onClick={openAddService}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-white hover:bg-primary-semi-dark transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Add Custom Item
+              </button>
+            </div>
+
+            {/* Custom Services */}
+            {customServices.length > 0 && (
+              <div className="mb-4">
+                <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-2">Custom Items</p>
+                <div className="space-y-1.5">
+                  {customServices.map((svc) => (
+                    <div
+                      key={svc.id}
+                      className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-base-ultra-light group"
                     >
-                      {item.season}
-                    </span>
-                  </div>
-                ))}
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <span className="text-sm font-medium text-foreground">{svc.name}</span>
+                        {svc.frequency && (
+                          <span className="text-xs text-primary">{svc.frequency}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded font-medium ${getSeasonColor(
+                            svc.season as any
+                          )}`}
+                        >
+                          {svc.season}
+                        </span>
+                        <button
+                          onClick={() => openEditService(svc)}
+                          className="opacity-0 group-hover:opacity-100 text-neutral hover:text-primary transition-all p-1"
+                          title="Edit"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => deleteCustomService(svc.id)}
+                          className="opacity-0 group-hover:opacity-100 text-neutral hover:text-danger transition-all p-1"
+                          title="Delete"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Standard Services */}
+            {allStandardServices.length === 0 && customServices.length === 0 ? (
+              <p className="text-sm text-neutral">No services selected for this client.</p>
+            ) : allStandardServices.length > 0 && (
+              <div>
+                {customServices.length > 0 && (
+                  <p className="text-xs font-semibold text-neutral uppercase tracking-wide mb-2">Standard Items</p>
+                )}
+                <div className="space-y-1.5">
+                  {allStandardServices.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-base-ultra-light"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-foreground">{item.name}</span>
+                        {item.frequency && (
+                          <span className="text-xs text-primary">{item.frequency}</span>
+                        )}
+                      </div>
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded font-medium ${getSeasonColor(
+                          item.season
+                        )}`}
+                      >
+                        {item.season}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -311,6 +619,131 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           </div>
         </div>
       </div>
+
+      {/* Add/Edit Custom Service Modal */}
+      {showServiceModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <h3 className="text-lg font-semibold text-foreground mb-4">
+                {editingService ? 'Edit Custom Service' : 'Add Custom Service'}
+              </h3>
+
+              <form onSubmit={saveCustomService} className="space-y-4">
+                {/* Name */}
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">
+                    Service Name <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={serviceForm.name}
+                    onChange={(e) => setServiceForm({ ...serviceForm, name: e.target.value })}
+                    placeholder="e.g., Generator Maintenance"
+                    className="w-full px-4 py-2.5 rounded-lg border border-base-light bg-white text-foreground placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    required
+                  />
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={serviceForm.description}
+                    onChange={(e) => setServiceForm({ ...serviceForm, description: e.target.value })}
+                    placeholder="Brief description of the service..."
+                    rows={2}
+                    className="w-full px-4 py-2.5 rounded-lg border border-base-light bg-white text-foreground placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none"
+                  />
+                </div>
+
+                {/* Season */}
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">
+                    Season
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {SEASON_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setServiceForm({ ...serviceForm, season: opt.value })}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                          serviceForm.season === opt.value
+                            ? `${getSeasonColor(opt.value as any)} border-transparent`
+                            : 'bg-white border-base-light text-neutral hover:bg-base-ultra-light'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Frequency */}
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">
+                    Frequency <span className="text-xs text-neutral">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={serviceForm.frequency}
+                    onChange={(e) => setServiceForm({ ...serviceForm, frequency: e.target.value })}
+                    placeholder="e.g., Monthly, Annually, Every 6 Months"
+                    className="w-full px-4 py-2.5 rounded-lg border border-base-light bg-white text-foreground placeholder-neutral focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  />
+                </div>
+
+                {/* Active Months */}
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">
+                    Active Months <span className="text-xs text-neutral">(when to recommend)</span>
+                  </label>
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {MONTH_NAMES.map((name, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => toggleMonth(idx)}
+                        className={`px-2 py-1.5 rounded text-xs font-medium border transition-all ${
+                          serviceForm.active_months.includes(idx)
+                            ? 'bg-primary text-white border-primary'
+                            : 'bg-white border-base-light text-neutral hover:bg-base-ultra-light'
+                        }`}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-neutral mt-1">
+                    Clients will be notified 30 days before each active month.
+                  </p>
+                </div>
+
+                {/* Buttons */}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="submit"
+                    disabled={savingService || !serviceForm.name.trim()}
+                    className="flex-1 bg-primary text-white py-2.5 rounded-lg text-sm font-medium hover:bg-primary-semi-dark transition-colors disabled:opacity-50"
+                  >
+                    {savingService ? 'Saving...' : editingService ? 'Update Service' : 'Add Service'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowServiceModal(false)}
+                    className="px-6 py-2.5 bg-white border border-base-light rounded-lg text-sm font-medium hover:bg-base-ultra-light"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
