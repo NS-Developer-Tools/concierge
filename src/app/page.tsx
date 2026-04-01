@@ -38,15 +38,12 @@ export default function Dashboard() {
 
         const lastContact = comms?.[0]?.communicated_at || null;
         const now = new Date();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
 
         let contactedThisMonth = false;
         if (lastContact) {
-          const contactDate = new Date(lastContact);
-          contactedThisMonth =
-            contactDate.getMonth() === currentMonth &&
-            contactDate.getFullYear() === currentYear;
+          const daysSinceContact =
+            (now.getTime() - new Date(lastContact).getTime()) / (1000 * 60 * 60 * 24);
+          contactedThisMonth = daysSinceContact < 30;
         }
 
         return {
@@ -92,11 +89,11 @@ export default function Dashboard() {
           <p className="text-3xl font-bold text-foreground mt-1">{totalClients}</p>
         </div>
         <div className="bg-white rounded-xl border border-base-light p-5">
-          <p className="text-sm text-neutral">Needs Contact This Month</p>
+          <p className="text-sm text-neutral">Needs Contact (30+ days)</p>
           <p className="text-3xl font-bold text-accent-gold mt-1">{needsContact}</p>
         </div>
         <div className="bg-white rounded-xl border border-base-light p-5">
-          <p className="text-sm text-neutral">Contacted This Month</p>
+          <p className="text-sm text-neutral">Contacted (last 30 days)</p>
           <p className="text-3xl font-bold text-accent-green mt-1">
             {totalClients - needsContact}
           </p>

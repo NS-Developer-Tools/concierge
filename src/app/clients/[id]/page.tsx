@@ -339,10 +339,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
   const allStandardServices = MAINTENANCE_ITEMS.filter((item) => client.services.includes(item.id));
   const completedCount = recommendedItems.filter((item) => isCompleted(item.id)).length;
-  const contactedThisMonth = communications.some((c) => {
-    const d = new Date(c.communicated_at);
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  });
+  const lastComm = communications[0];
+  const contactedThisMonth = lastComm
+    ? (now.getTime() - new Date(lastComm.communicated_at).getTime()) / (1000 * 60 * 60 * 24) < 30
+    : false;
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -366,7 +366,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           <div className="flex items-center gap-3 flex-wrap justify-end">
             {contactedThisMonth ? (
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                <span className="w-2 h-2 rounded-full bg-green-500" />Contacted This Month
+                <span className="w-2 h-2 rounded-full bg-green-500" />Contacted Recently
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
